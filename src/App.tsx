@@ -1,40 +1,57 @@
+import { ApolloClient, InMemoryCache } from "@apollo/client";
 import {
   Box,
   Button,
   Text,
   Textarea,
   theme,
-  ThemeProvider
+  ThemeProvider,
 } from "@chakra-ui/core";
-
-import * as React from "react";
-import "./styles.css";
-import { convert } from "./converter";
 import Axios from "axios";
-import { ApolloClient, InMemoryCache } from "@apollo/client";
-import { DEVELOPER_BY_SK_ID, UPDATE_DEVELOPER } from "./queries";
-import { Developer, SKDeveloper } from "./types";
+import * as React from "react";
+import { convert } from "./converter";
+import useLocalStorage from "./hooks/useLocalSorage";
+import {
+  getCompoundIdBySKID,
+  proccessCompound,
+} from "./process/processCompounds";
+import { getDeveloperId, proccessDeveloper } from "./process/processDevelopers";
+import { proccessUnit } from "./process/processUnits";
+import "./styles.css";
+import { SKCompound, SKDeveloper } from "./types";
 
 const customTheme = {
-  ...theme
+  ...theme,
 };
 
 const headers = {
   "content-type": "application/json",
-  "x-hasura-admin-secret": "rKpA@W3S2PlZsK"
+  "x-hasura-admin-secret": "rKpA@W3S2PlZsK",
 };
 
 export const client = new ApolloClient({
   uri: "https://realestate.hasura.app/v1/graphql",
   headers,
-  cache: new InMemoryCache()
+  cache: new InMemoryCache(),
 });
+
+function sleep(time: number) {
+  return new Promise((resolve) => setTimeout(resolve, time));
+}
 
 export default function App() {
   let [value, setValue] = React.useState("");
-  let [page, setPage] = React.useState(1);
+  let [page, setPage] = useLocalStorage("PAGE", 1);
   let [structVal, setStructVal] = React.useState("");
   let [newArr, setNewArr] = React.useState<any[]>([]);
+  let [storedDevIds, setStoredDevIds] = useLocalStorage(
+    "PROCESSED_DEVELOPERS",
+    []
+  );
+  let [storedCompoundsIds, setStoredCompoundsIds] = useLocalStorage(
+    "PROCESSED_COMPOUNDS",
+    []
+  );
 
   let handleInputChange = (e: React.ChangeEvent<any>) => {
     setValue(e.target.value);
@@ -50,22 +67,55 @@ export default function App() {
 
   const goNext = async () => {
     // first let's fetch page / unit
+    /*
     const resp = await Axios.post(
-      "https://app.sakneen.com/apis/marketplace/filters?sort=financial_plan.monthly_payment&limit=1&page=1",
+      `https://app.sakneen.com/apis/marketplace/filters?sort=financial_plan.monthly_payment&limit=1&page=${page}`,
       { range: {}, multiple: {}, exaxt: {}, match: {} },
       {
         headers: {
-          origin: "https://www.sakneen.com",
-          referer: "https://www.sakneen.com/",
           "app-request-origin": "sakneen-platform",
-          "Cotent-type": "application/json"
-        }
+          "Cotent-type": "application/json",
+        },
       }
     );
-    console.log("goNext ", resp.data.listings[0]);
-    const developerData: SKDeveloper = resp.data.listings[0].developer;
-    proccessDeveloper(developerData);
+    */
+    const resp = await Axios.get(
+      `https://6uoxt.sse.codesandbox.io/units?page=${page}`
+    );
+
+    console.log("%c Mo2Log resp ", "background: #bada55", resp.data);
+    const unit = resp.data[0];
+    // Process Developer
+    const skDeveloper: SKDeveloper = unit.developer;
+    const developer_id = await getDeveloperId(skDeveloper._id);
+    if ((storedDevIds as string[])?.indexOf(skDeveloper._id) < 0) {
+      const id = await proccessDeveloper(developer_id, skDeveloper);
+      if (id) {
+        setStoredDevIds([...storedDevIds, skDeveloper._id]);
+      }
+    }
+
+    const skCompound: SKCompound = unit.compound;
+    const compound_id = await getCompoundIdBySKID(skCompound._id);
+    if ((storedCompoundsIds as string[])?.indexOf(skCompound._id) < 0) {
+      const id = await proccessCompound(compound_id, skCompound);
+      if (id) {
+        setStoredCompoundsIds([...storedCompoundsIds, skCompound._id]);
+      }
+    }
+
+    await proccessUnit(unit, {
+      developer_id,
+      compound_id,
+    });
+
+    await sleep(1500);
+    setPage(1 + page);
   };
+
+  React.useEffect(() => {
+    goNext();
+  }, [page]);
 
   return (
     <ThemeProvider theme={customTheme}>
